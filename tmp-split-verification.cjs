@@ -89,7 +89,19 @@ async function getGroupWithTab(page, label) {
 async function dragTabTo(page, label, target, targetPosition) {
   const source = page.locator('.tailmux-dockview-tab-label').filter({ hasText: label }).first();
   await waitForVisible(source);
-  await source.dragTo(target, { targetPosition });
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  const startX = sourceBox.x + (sourceBox.width / 2);
+  const startY = sourceBox.y + (sourceBox.height / 2);
+  const endX = targetBox.x + targetPosition.x;
+  const endY = targetBox.y + targetPosition.y;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 10, startY + 10, { steps: 4 });
+  await page.mouse.move(endX, endY, { steps: 20 });
+  await page.mouse.up();
+  await sleep(400);
 }
 
 async function getTrimmedTexts(locator) {
@@ -117,8 +129,7 @@ async function run() {
     await waitForCount(page.locator('.tailmux-dockview-tab-label'), 3);
 
     const mainTab = page.locator('.tailmux-dockview-tab-label').filter({ hasText: 'main' }).first();
-    const agentTab = page.locator('.tailmux-dockview-tab-label').filter({ hasText: 'agent-1' }).first();
-    await agentTab.dragTo(mainTab, { targetPosition: { x: 6, y: 10 } });
+    await dragTabTo(page, 'agent-1', mainTab, { x: 6, y: 10 });
 
     const reordered = await getTrimmedTexts(page.locator('.dv-groupview').first().locator('.tailmux-dockview-tab-label'));
     assert.deepEqual(reordered, [shellLabel, 'agent-1', 'main']);
