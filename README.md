@@ -5,19 +5,29 @@ Browser-based terminal emulator with tmux integration, multi-tab support, and mo
 ## Quick Start
 
 ```bash
+bun install
+bun run start
+```
+
+If you prefer npm instead:
+
+```bash
 npm install
 npm start
 ```
 
 Visit `http://localhost:3000` to open Tailmux.
 
+`bun run start` now builds the bundled browser assets under `public/build/` and then launches `node server.js`. Do not force Bun's runtime with `bun --bun run start`; `node-pty` is a native addon and currently expects the Node.js runtime ABI.
+
 ## Features
 
 - **Full terminal emulation** using xterm.js
-- **Multi-tab support** - Multiple terminals in separate tabs
+- **Dockview workspace tabs** - Drag tabs to reorder them, move them between groups, or split the browser workspace vertically and horizontally
 - **tmux integration** - Create or attach to persistent tmux sessions
 - **Session dashboard** - Manage all tabs from one interface
 - **Mobile optimized** - Virtual keyboard and tmux control panel
+- **Workspace restore** - tmux-backed split layouts restore after reload; plain shell tabs are intentionally skipped
 
 ## Deployment
 
@@ -68,7 +78,7 @@ See the systemd service configuration in the [deployment section below](#systemd
 
 ```bash
 # Bind Tailmux to localhost, then publish via Tailscale:
-HOST=127.0.0.1 TAILMUX_TOKEN=your-token-here npm start
+HOST=127.0.0.1 TAILMUX_TOKEN=your-token-here bun run start
 tailscale serve tcp 3000 --name tailmux
 ```
 
@@ -90,7 +100,7 @@ Users on your tailnet can access via the MagicDNS name.
 tmux is pre-installed in the Docker image.
 
 ### Bare Metal
-Install Node.js 20+ and tmux:
+Install Node.js 20+ and tmux. Bun is preferred as the package manager/script runner, but Node.js is still required at runtime:
 
 ```bash
 # macOS
@@ -103,6 +113,15 @@ sudo apt install -y nodejs npm tmux
 sudo dnf install -y nodejs npm tmux
 ```
 
+Install Bun and use:
+
+```bash
+bun install
+bun run start
+```
+
+This still launches Tailmux through `node server.js` after running the Bun frontend build. npm remains available as a fallback.
+
 ## Usage
 
 Open `http://localhost:3000` in your browser. You'll see options to:
@@ -112,10 +131,20 @@ Open `http://localhost:3000` in your browser. You'll see options to:
 
 ### Interface
 
-- **Tabs**: Click `+` to create new tabs, click tab to switch, `×` to close
-- **Dashboard**: Grid icon shows all sessions and statistics
+- **Tabs and splits**: Click `+` to create new tabs, drag tabs within a group to rearrange them, drag onto another group's left/right/top/bottom edge to create a split, and drag a single-tab group back into another header to collapse it
+- **Dashboard**: Grid icon shows a flat session list, session statistics, and reset-layout control
 - **Mobile**: Keyboard icon for virtual keys, tmux icon for command panel
 - **Scrolling**: Two-finger swipe, scroll buttons, or tmux copy mode
+
+Tailmux now treats Dockview groups as visible panes. Global toolbar actions always target the focused pane, and the toolbar summary shows which session currently owns those actions.
+
+Tab drag and split creation are desktop-first in this phase. Mobile keeps the keyboard and tmux controls, but touch drag-and-drop quality will depend on the browser.
+
+Current limitations:
+
+- Floating or pop-out groups are intentionally disabled
+- The dashboard stays flat even when tabs are distributed across multiple visible groups
+- Only tmux-backed tabs (`tmux` / `attach`) restore after reload; `new` shell tabs do not
 
 ## systemd Service Configuration
 
@@ -132,6 +161,12 @@ For bare-metal Linux deployments:
    ```bash
    sudo -u tailmux git clone https://github.com/adamcowan/tailmux.git /opt/tailmux
    cd /opt/tailmux
+   sudo -u tailmux bun install
+   ```
+
+   Optional fallback if Bun is unavailable for the service user:
+
+   ```bash
    sudo -u tailmux npm install --omit=dev
    ```
 

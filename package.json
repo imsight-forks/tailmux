@@ -4,8 +4,9 @@
   "description": "Tailmux remote terminal access via browser",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "build": "bun build ./public/app.js --outdir ./public/build --target browser --format esm",
+    "start": "bun run build && node server.js",
+    "dev": "bun run build && node server.js"
   },
   "repository": {
     "type": "git",
@@ -16,9 +17,12 @@
   },
   "homepage": "https://github.com/adamcowan/tailmux#readme",
   "dependencies": {
-    "ws": "^8.18.0",
+    "dockview-core": "^5.1.0",
+    "express": "^4.21.1",
     "node-pty": "^1.0.0",
-    "express": "^4.21.1"
+    "ws": "^8.18.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
   },
   "devDependencies": {},
   "keywords": ["terminal", "remote", "websocket", "pty", "tmux", "xterm", "browser-terminal"],
