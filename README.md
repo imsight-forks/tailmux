@@ -9,7 +9,16 @@ npm install
 npm start
 ```
 
+Or, if you prefer Bun as the package manager/script runner:
+
+```bash
+bun install
+bun run start
+```
+
 Visit `http://localhost:3000` to open Tailmux.
+
+`bun run start` works because it executes the package script `node server.js`. Do not force Bun's runtime with `bun --bun run start`; `node-pty` is a native addon and currently expects the Node.js runtime ABI.
 
 ## Features
 
@@ -90,7 +99,7 @@ Users on your tailnet can access via the MagicDNS name.
 tmux is pre-installed in the Docker image.
 
 ### Bare Metal
-Install Node.js 20+ and tmux:
+Install Node.js 20+ and tmux. Bun is optional as a package manager/script runner, but Node.js is still required at runtime:
 
 ```bash
 # macOS
@@ -102,6 +111,15 @@ sudo apt install -y nodejs npm tmux
 # RHEL/Fedora
 sudo dnf install -y nodejs npm tmux
 ```
+
+If you want to use Bun for dependency management instead of npm, install Bun separately and then use:
+
+```bash
+bun install
+bun run start
+```
+
+This still launches Tailmux through `node server.js`.
 
 ## Usage
 
@@ -133,6 +151,12 @@ For bare-metal Linux deployments:
    sudo -u tailmux git clone https://github.com/adamcowan/tailmux.git /opt/tailmux
    cd /opt/tailmux
    sudo -u tailmux npm install --omit=dev
+   ```
+
+   Optional alternative if Bun is installed for the service user:
+
+   ```bash
+   sudo -u tailmux bun install
    ```
 
 3. **Create `/etc/systemd/system/tailmux.service`:**
