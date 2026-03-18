@@ -20,6 +20,13 @@ Visit `http://localhost:3000` to open Tailmux.
 
 `bun run start` now builds the bundled browser assets under `public/build/` and then launches `node server.js`. Do not force Bun's runtime with `bun --bun run start`; `node-pty` is a native addon and currently expects the Node.js runtime ABI.
 
+If you need Tailmux to keep running after you disconnect, use a real process supervisor such as `systemd`, `pm2`, Docker, or a detached `tmux` session. In some environments, bare detached launches such as `nohup npm start &` or `nohup node server.js &` can exit immediately even though the same command works in the foreground. Tailmux itself does not require tmux to host the web server, but tmux is a reliable way to keep the process alive when you do not have `systemd` available. For example:
+
+```bash
+tmux new-session -d -s tailmux \
+  'cd /path/to/tailmux && HOST=127.0.0.1 PORT=3000 node server.js'
+```
+
 ## Features
 
 - **Full terminal emulation** using xterm.js
