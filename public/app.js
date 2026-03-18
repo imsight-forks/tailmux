@@ -13,6 +13,7 @@ let sessionMode = 'new';
 let workspace = null;
 let toastContainer = null;
 let saveLayoutTimer = null;
+let workspaceLayoutTimer = null;
 let isRestoringWorkspace = false;
 let persistenceSuppressed = false;
 
@@ -29,7 +30,7 @@ let sessionFetchPromise = null;
 
 const DEFAULT_TOAST_DURATION = 4000;
 const WORKSPACE_STORAGE_KEY = 'tailmux_workspace_v1';
-const WORKSPACE_STATE_VERSION = 1;
+const WORKSPACE_STATE_VERSION = 2;
 const WORKSPACE_SAVE_DELAY = 120;
 
 const TMUX_SESSION_MODES = new Set(['tmux', 'attach']);
@@ -200,22 +201,55 @@ function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
 
-function getOrderedSessionIds() {
-  if (workspace && workspace.groups.length > 0) {
-    const ids = [];
-    workspace.groups.forEach((group) => {
-      group.panels.forEach((panel) => {
-        if (sessions.has(panel.id)) {
-          ids.push(panel.id);
-        }
-      });
-    });
-    if (ids.length > 0) {
-      return ids;
-    }
+function collectPanelIdsFromLayoutNode(node, ids = [], seen = new Set()) {
+  if (!node || typeof node !== 'object') {
+    return ids;
   }
 
-  return Array.from(sessions.keys());
+  if (node.type === 'leaf') {
+    const sourcePanels = Array.isArray(node.data?.panels)
+      ? node.data.panels
+      : Array.isArray(node.data?.views)
+        ? node.data.views
+        : [];
+
+    sourcePanels.forEach((panelId) => {
+      if (!seen.has(panelId)) {
+        seen.add(panelId);
+        ids.push(panelId);
+      }
+    });
+
+    return ids;
+  }
+
+  if (node.type === 'branch' && Array.isArray(node.data)) {
+    node.data.forEach((child) => collectPanelIdsFromLayoutNode(child, ids, seen));
+  }
+
+  return ids;
+}
+
+function getOrderedSessionIdsFromLayout(layout) {
+  if (!layout?.grid?.root) {
+    return [];
+  }
+
+  return collectPanelIdsFromLayoutNode(layout.grid.root).filter((panelId) => sessions.has(panelId));
+}
+
+function getOrderedSessionIds() {
+  const orderedIds = workspace ? getOrderedSessionIdsFromLayout(workspace.toJSON()) : [];
+  const seen = new Set(orderedIds);
+
+  Array.from(sessions.keys()).forEach((sessionId) => {
+    if (!seen.has(sessionId)) {
+      orderedIds.push(sessionId);
+      seen.add(sessionId);
+    }
+  });
+
+  return orderedIds;
 }
 
 function getPanelParams(session) {
@@ -315,6 +349,25 @@ function getFirstLeafGroupId(node) {
   return undefined;
 }
 
+function getLeafGroupIds(node, ids = []) {
+  if (!node || typeof node !== 'object') {
+    return ids;
+  }
+
+  if (node.type === 'leaf') {
+    if (node.data?.id) {
+      ids.push(node.data.id);
+    }
+    return ids;
+  }
+
+  if (node.type === 'branch' && Array.isArray(node.data)) {
+    node.data.forEach((child) => getLeafGroupIds(child, ids));
+  }
+
+  return ids;
+}
+
 function filterLayoutNode(node, allowedIds) {
   if (!node || typeof node !== 'object') {
     return null;
@@ -388,7 +441,10 @@ function buildFilteredLayout(layout, allowedIds) {
     return null;
   }
 
-  const activeGroup = getFirstLeafGroupId(root);
+  const retainedGroupIds = getLeafGroupIds(root);
+  const activeGroup = retainedGroupIds.includes(layout.activeGroup)
+    ? layout.activeGroup
+    : retainedGroupIds[0] || getFirstLeafGroupId(root);
 
   return {
     ...layout,
@@ -413,6 +469,22 @@ function formatSkippedRestoreMessage(skippedDescriptors) {
   return `Skipped restoring ${count} shell tabs because plain shell sessions do not survive reloads.`;
 }
 
+function syncFocusedPaneState() {
+  workspace?.groups?.forEach((group) => {
+    group.element.classList.remove('tailmux-group-has-active-pane');
+  });
+
+  sessions.forEach((session, sessionId) => {
+    const isActivePane = sessionId === activeSessionId;
+    session.root.classList.toggle('active-pane', isActivePane);
+    session.root.parentElement?.classList.toggle('active-pane', isActivePane);
+
+    if (session.panel?.group?.element) {
+      session.panel.group.element.classList.toggle('tailmux-group-has-active-pane', isActivePane);
+    }
+  });
+}
+
 function updateWorkspaceSummary() {
   const session = getActiveSession();
   if (!dom.workspaceActiveSession) {
@@ -420,12 +492,18 @@ function updateWorkspaceSummary() {
   }
 
   if (!session) {
-    dom.workspaceActiveSession.textContent = 'No active session';
+    dom.workspaceActiveSession.textContent = 'No focused pane';
     return;
   }
 
   const status = session.connected ? 'connected' : 'disconnected';
-  dom.workspaceActiveSession.textContent = `${session.sessionLabel} · ${session.mode} · ${status}`;
+  const orderedIds = getOrderedSessionIds();
+  const paneIndex = orderedIds.indexOf(session.id);
+  const positionText = paneIndex >= 0 ? ` · pane ${paneIndex + 1}/${orderedIds.length}` : '';
+  const visiblePaneCount = workspace?.groups?.length || 1;
+  const groupText = visiblePaneCount > 1 ? ` · ${visiblePaneCount} visible panes` : '';
+
+  dom.workspaceActiveSession.textContent = `${session.sessionLabel} · ${session.mode} · ${status}${positionText}${groupText}`;
 }
 
 function updateTmuxToolbarButtons() {
@@ -462,12 +540,27 @@ function updateSessionPanelState(session) {
 
 function setActiveSession(sessionId) {
   activeSessionId = sessionId || null;
+  syncFocusedPaneState();
   updateWorkspaceSummary();
   updateTmuxToolbarButtons();
   updateDashboard();
+}
 
-  if (sessionId) {
-    scheduleFitSession(sessionId);
+function requestSessionActivation(sessionId, options = {}) {
+  const session = getSession(sessionId);
+  if (!session) {
+    return;
+  }
+
+  const { focusTerminal = false } = options;
+  const panel = workspace?.getPanel(sessionId);
+  if (panel && !panel.api.isActive) {
+    panel.api.setActive();
+  }
+
+  setActiveSession(sessionId);
+
+  if (focusTerminal) {
     focusSession(sessionId);
   }
 }
@@ -522,40 +615,36 @@ function scheduleFitSession(sessionId, delay = 0) {
   }, delay);
 }
 
+function layoutWorkspaceNow(force = false) {
+  if (!workspace || !dom.dockview) {
+    return;
+  }
+
+  const width = dom.dockview.clientWidth;
+  const height = dom.dockview.clientHeight;
+  workspace.layout(width, height, force);
+}
+
+function scheduleWorkspaceLayout(delay = 0, force = false) {
+  if (!workspace || !dom.dockview) {
+    return;
+  }
+
+  if (workspaceLayoutTimer) {
+    clearTimeout(workspaceLayoutTimer);
+  }
+
+  workspaceLayoutTimer = window.setTimeout(() => {
+    workspaceLayoutTimer = null;
+    requestAnimationFrame(() => layoutWorkspaceNow(force));
+  }, delay);
+}
+
 function setupMobileDetection() {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   if (isMobile) {
     document.body.classList.add('mobile');
   }
-}
-
-function isAllowedDropEvent(event) {
-  if (event.kind === 'tab' || event.kind === 'header_space') {
-    return true;
-  }
-
-  return event.kind === 'content' && event.position === 'center';
-}
-
-function ensureSingleVisibleGroup() {
-  if (!workspace || workspace.groups.length <= 1) {
-    return;
-  }
-
-  const primaryGroup = workspace.activeGroup || workspace.groups[0];
-  const groupsToNormalize = workspace.groups.filter((group) => group !== primaryGroup);
-
-  groupsToNormalize.forEach((group) => {
-    const panelsToMove = [...group.panels];
-    panelsToMove.forEach((panel, index) => {
-      panel.api.moveTo({
-        group: primaryGroup,
-        position: 'center',
-        index: primaryGroup.panels.length + index,
-        skipSetActive: true
-      });
-    });
-  });
 }
 
 function createWatermarkComponent() {
@@ -645,6 +734,7 @@ function createTerminalComponent() {
     const session = getSession(sessionId);
     if (!session) {
       element.replaceChildren();
+      element.classList.remove('active-pane');
       return;
     }
 
@@ -652,6 +742,7 @@ function createTerminalComponent() {
       element.replaceChildren(session.root);
     }
 
+    element.classList.toggle('active-pane', sessionId === activeSessionId);
     scheduleFitSession(sessionId);
   }
 
@@ -675,7 +766,9 @@ function createTerminalComponent() {
     },
     focus() {
       if (currentSessionId) {
-        focusSession(currentSessionId);
+        const session = getSession(currentSessionId);
+        element.classList.toggle('active-pane', currentSessionId === activeSessionId);
+        session?.root?.classList.toggle('active-pane', currentSessionId === activeSessionId);
       }
     },
     dispose() {
@@ -706,31 +799,22 @@ function initializeWorkspace() {
   });
 
   workspace.onDidMovePanel(() => {
-    ensureSingleVisibleGroup();
     scheduleWorkspaceSave();
     updateDashboard();
+    updateWorkspaceSummary();
+    scheduleWorkspaceLayout();
   });
 
   workspace.onDidLayoutChange(() => {
-    ensureSingleVisibleGroup();
     scheduleWorkspaceSave();
     updateDashboard();
+    updateWorkspaceSummary();
   });
 
   workspace.onDidLayoutFromJSON(() => {
-    ensureSingleVisibleGroup();
-  });
-
-  workspace.onWillShowOverlay((event) => {
-    if (!isAllowedDropEvent(event)) {
-      event.preventDefault();
-    }
-  });
-
-  workspace.onWillDrop((event) => {
-    if (!isAllowedDropEvent(event)) {
-      event.preventDefault();
-    }
+    updateDashboard();
+    updateWorkspaceSummary();
+    scheduleWorkspaceLayout();
   });
 }
 
@@ -970,6 +1054,10 @@ function createSessionRoot(sessionId, mode) {
   root.className = 'tailmux-terminal-root';
   root.id = `terminal-${sessionId}`;
 
+  const forwardPaneFocus = () => requestSessionActivation(sessionId);
+  root.addEventListener('pointerdown', forwardPaneFocus);
+  root.addEventListener('focusin', forwardPaneFocus);
+
   const scrollControls = document.createElement('div');
   scrollControls.className = 'scroll-controls mobile-only';
   scrollControls.innerHTML = `
@@ -1039,6 +1127,7 @@ function createSessionRoot(sessionId, mode) {
 
   const terminalDiv = document.createElement('div');
   terminalDiv.className = 'terminal';
+  terminalDiv.addEventListener('focusin', forwardPaneFocus);
 
   root.appendChild(scrollControls);
   if (tmuxSoftKeys) {
@@ -1067,19 +1156,12 @@ function bindSessionPanelLifecycle(session) {
   }));
   session.panelDisposables.push(panel.api.onDidFocusChange((event) => {
     if (event.isFocused) {
-      focusSession(session.id);
-    }
-  }));
-  session.panelDisposables.push(panel.api.onDidActiveChange((event) => {
-    if (event.isActive) {
       setActiveSession(session.id);
     }
   }));
 }
 
 function addWorkspacePanel(session, activate) {
-  const orderedSessionIds = getOrderedSessionIds();
-  const referenceSessionId = orderedSessionIds[orderedSessionIds.length - 1];
   const addOptions = {
     id: session.id,
     component: 'tailmux-terminal',
@@ -1090,10 +1172,15 @@ function addWorkspacePanel(session, activate) {
     inactive: !activate
   };
 
-  if (referenceSessionId && referenceSessionId !== session.id) {
+  const referencePanel = activeSessionId
+    ? workspace?.getPanel(activeSessionId)
+    : workspace?.activePanel;
+
+  if (referencePanel && referencePanel.id !== session.id) {
     addOptions.position = {
-      referencePanel: referenceSessionId,
-      direction: 'within'
+      referencePanel: referencePanel.id,
+      direction: 'within',
+      index: referencePanel.group.panels.indexOf(referencePanel) + 1
     };
   }
 
@@ -1143,6 +1230,9 @@ function bootstrapSessionTerminal(sessionId, attempt = 0) {
     currentSession.term.onLineFeed(() => updateScrollIndicator(sessionId));
 
     scheduleFitSession(sessionId);
+    if (sessionId === activeSessionId) {
+      focusSession(sessionId);
+    }
     updateScrollIndicator(sessionId);
     connectTerminal(sessionId);
   });
@@ -1463,7 +1553,11 @@ function closeSession(sessionId) {
     showSessionSelector();
   } else {
     const nextActiveId = workspace.activePanel?.id || getOrderedSessionIds()[0] || null;
-    setActiveSession(nextActiveId);
+    if (nextActiveId) {
+      requestSessionActivation(nextActiveId, { focusTerminal: true });
+    } else {
+      setActiveSession(null);
+    }
     scheduleWorkspaceSave();
   }
 
@@ -1473,13 +1567,7 @@ function closeSession(sessionId) {
 }
 
 function activateSession(sessionId) {
-  const panel = workspace?.getPanel(sessionId);
-  if (!panel) {
-    return;
-  }
-
-  panel.api.setActive();
-  setActiveSession(sessionId);
+  requestSessionActivation(sessionId, { focusTerminal: true });
 }
 
 async function loadSessions() {
@@ -1624,6 +1712,7 @@ async function updateDashboard() {
 
     const item = document.createElement('div');
     item.className = 'dashboard-tab-item';
+    item.classList.toggle('active', sessionId === activeSessionId);
 
     const info = document.createElement('div');
     info.className = 'dashboard-tab-info';
@@ -1705,9 +1794,7 @@ function toggleVirtualKeyboard() {
     dom.terminalContainer.classList.remove('tmux-visible');
   }
 
-  if (activeSessionId) {
-    scheduleFitSession(activeSessionId, 100);
-  }
+  scheduleWorkspaceLayout(100, true);
 }
 
 function toggleTmuxPanel() {
@@ -1719,9 +1806,7 @@ function toggleTmuxPanel() {
     dom.terminalContainer.classList.remove('keyboard-visible');
   }
 
-  if (activeSessionId) {
-    scheduleFitSession(activeSessionId, 100);
-  }
+  scheduleWorkspaceLayout(100, true);
 }
 
 function sendInputToSession(session, data) {
@@ -1942,9 +2027,7 @@ function bindStaticEventHandlers() {
   });
 
   window.addEventListener('resize', () => {
-    if (activeSessionId) {
-      scheduleFitSession(activeSessionId);
-    }
+    scheduleWorkspaceLayout(0, true);
   });
 
   window.addEventListener('beforeunload', () => {
@@ -2003,14 +2086,12 @@ async function restoreWorkspaceState() {
       }
     }
 
-    ensureSingleVisibleGroup();
-
     const preferredActiveId = payload.activeSessionId && allowedIds.has(payload.activeSessionId)
       ? payload.activeSessionId
-      : getOrderedSessionIds()[0];
+      : getOrderedSessionIds()[0] || payload.orderedSessionIds?.find((sessionId) => allowedIds.has(sessionId));
 
     if (preferredActiveId) {
-      activateSession(preferredActiveId);
+      requestSessionActivation(preferredActiveId, { focusTerminal: true });
     }
 
     if (skippedShellDescriptors.length > 0) {
@@ -2018,6 +2099,7 @@ async function restoreWorkspaceState() {
     }
   } finally {
     isRestoringWorkspace = false;
+    scheduleWorkspaceLayout(0, true);
     persistWorkspaceState();
   }
 
