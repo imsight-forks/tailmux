@@ -23,10 +23,11 @@ Visit `http://localhost:3000` to open Tailmux.
 ## Features
 
 - **Full terminal emulation** using xterm.js
-- **Rearrangeable terminal tabs** - Dockview-managed browser tabs with drag-and-drop reordering
+- **Dockview workspace tabs** - Drag tabs to reorder them, move them between groups, or split the browser workspace vertically and horizontally
 - **tmux integration** - Create or attach to persistent tmux sessions
 - **Session dashboard** - Manage all tabs from one interface
 - **Mobile optimized** - Virtual keyboard and tmux control panel
+- **Workspace restore** - tmux-backed split layouts restore after reload; plain shell tabs are intentionally skipped
 
 ## Deployment
 
@@ -130,12 +131,20 @@ Open `http://localhost:3000` in your browser. You'll see options to:
 
 ### Interface
 
-- **Tabs**: Click `+` to create new tabs, drag tabs to reorder them, and use `×` to close
-- **Dashboard**: Grid icon shows all sessions and statistics
+- **Tabs and splits**: Click `+` to create new tabs, drag tabs within a group to rearrange them, drag onto another group's left/right/top/bottom edge to create a split, and drag a single-tab group back into another header to collapse it
+- **Dashboard**: Grid icon shows a flat session list, session statistics, and reset-layout control
 - **Mobile**: Keyboard icon for virtual keys, tmux icon for command panel
 - **Scrolling**: Two-finger swipe, scroll buttons, or tmux copy mode
 
-Tab drag is desktop-first in this phase. Mobile keeps the keyboard/tmux controls, but touch drag-and-drop support will depend on the browser.
+Tailmux now treats Dockview groups as visible panes. Global toolbar actions always target the focused pane, and the toolbar summary shows which session currently owns those actions.
+
+Tab drag and split creation are desktop-first in this phase. Mobile keeps the keyboard and tmux controls, but touch drag-and-drop quality will depend on the browser.
+
+Current limitations:
+
+- Floating or pop-out groups are intentionally disabled
+- The dashboard stays flat even when tabs are distributed across multiple visible groups
+- Only tmux-backed tabs (`tmux` / `attach`) restore after reload; `new` shell tabs do not
 
 ## systemd Service Configuration
 
