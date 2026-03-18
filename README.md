@@ -5,15 +5,15 @@ Browser-based terminal emulator with tmux integration, multi-tab support, and mo
 ## Quick Start
 
 ```bash
-npm install
-npm start
-```
-
-Or, if you prefer Bun as the package manager/script runner:
-
-```bash
 bun install
 bun run start
+```
+
+If you prefer npm instead:
+
+```bash
+npm install
+npm start
 ```
 
 Visit `http://localhost:3000` to open Tailmux.
@@ -77,7 +77,7 @@ See the systemd service configuration in the [deployment section below](#systemd
 
 ```bash
 # Bind Tailmux to localhost, then publish via Tailscale:
-HOST=127.0.0.1 TAILMUX_TOKEN=your-token-here npm start
+HOST=127.0.0.1 TAILMUX_TOKEN=your-token-here bun run start
 tailscale serve tcp 3000 --name tailmux
 ```
 
@@ -99,7 +99,7 @@ Users on your tailnet can access via the MagicDNS name.
 tmux is pre-installed in the Docker image.
 
 ### Bare Metal
-Install Node.js 20+ and tmux. Bun is optional as a package manager/script runner, but Node.js is still required at runtime:
+Install Node.js 20+ and tmux. Bun is preferred as the package manager/script runner, but Node.js is still required at runtime:
 
 ```bash
 # macOS
@@ -112,14 +112,14 @@ sudo apt install -y nodejs npm tmux
 sudo dnf install -y nodejs npm tmux
 ```
 
-If you want to use Bun for dependency management instead of npm, install Bun separately and then use:
+Install Bun and use:
 
 ```bash
 bun install
 bun run start
 ```
 
-This still launches Tailmux through `node server.js`.
+This still launches Tailmux through `node server.js`. npm remains available as a fallback.
 
 ## Usage
 
@@ -150,13 +150,13 @@ For bare-metal Linux deployments:
    ```bash
    sudo -u tailmux git clone https://github.com/adamcowan/tailmux.git /opt/tailmux
    cd /opt/tailmux
-   sudo -u tailmux npm install --omit=dev
+   sudo -u tailmux bun install
    ```
 
-   Optional alternative if Bun is installed for the service user:
+   Optional fallback if Bun is unavailable for the service user:
 
    ```bash
-   sudo -u tailmux bun install
+   sudo -u tailmux npm install --omit=dev
    ```
 
 3. **Create `/etc/systemd/system/tailmux.service`:**
