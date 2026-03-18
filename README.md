@@ -18,12 +18,12 @@ npm start
 
 Visit `http://localhost:3000` to open Tailmux.
 
-`bun run start` works because it executes the package script `node server.js`. Do not force Bun's runtime with `bun --bun run start`; `node-pty` is a native addon and currently expects the Node.js runtime ABI.
+`bun run start` now builds the bundled browser assets under `public/build/` and then launches `node server.js`. Do not force Bun's runtime with `bun --bun run start`; `node-pty` is a native addon and currently expects the Node.js runtime ABI.
 
 ## Features
 
 - **Full terminal emulation** using xterm.js
-- **Multi-tab support** - Multiple terminals in separate tabs
+- **Rearrangeable terminal tabs** - Dockview-managed browser tabs with drag-and-drop reordering
 - **tmux integration** - Create or attach to persistent tmux sessions
 - **Session dashboard** - Manage all tabs from one interface
 - **Mobile optimized** - Virtual keyboard and tmux control panel
@@ -119,7 +119,7 @@ bun install
 bun run start
 ```
 
-This still launches Tailmux through `node server.js`. npm remains available as a fallback.
+This still launches Tailmux through `node server.js` after running the Bun frontend build. npm remains available as a fallback.
 
 ## Usage
 
@@ -130,10 +130,12 @@ Open `http://localhost:3000` in your browser. You'll see options to:
 
 ### Interface
 
-- **Tabs**: Click `+` to create new tabs, click tab to switch, `×` to close
+- **Tabs**: Click `+` to create new tabs, drag tabs to reorder them, and use `×` to close
 - **Dashboard**: Grid icon shows all sessions and statistics
 - **Mobile**: Keyboard icon for virtual keys, tmux icon for command panel
 - **Scrolling**: Two-finger swipe, scroll buttons, or tmux copy mode
+
+Tab drag is desktop-first in this phase. Mobile keeps the keyboard/tmux controls, but touch drag-and-drop support will depend on the browser.
 
 ## systemd Service Configuration
 
